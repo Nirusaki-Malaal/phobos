@@ -1,0 +1,44 @@
+# Catppuccin Mocha user theme for the Hermes dashboard.
+# Discovered at runtime from <hermes-home>/dashboard-themes/*.yaml
+# (seeded by hermes/entrypoint.sh from the image copy).
+# Palette: https://github.com/catppuccin/palette (Mocha flavour).
+name: catppuccin
+label: Catppuccin Mocha (=^･ω･^=)
+description: Soothing pastel Mocha — Hermes's favorite sunbeam nap spot.
+
+palette:
+  background: "#1e1e2e"
+  midground: "#cdd6f4"
+  foreground: "#ffffff"
+  warmGlow: rgba(203, 166, 247, 0.3)
+  noiseOpacity: 0.8
+
+typography:
+  baseSize: 15px
+  lineHeight: "1.55"
+  letterSpacing: "0"
+
+layout:
+  radius: 0.75rem
+  density: comfortable
+
+colorOverrides:
+  card: "#181825"
+  cardForeground: "#cdd6f4"
+  popover: "#181825"
+  popoverForeground: "#cdd6f4"
+  primary: "#cba6f7"
+  primaryForeground: "#11111b"
+  secondary: "#313244"
+  secondaryForeground: "#cdd6f4"
+  muted: "#45475a"
+  mutedForeground: "#a6adc8"
+  accent: "#89b4fa"
+  accentForeground: "#11111b"
+  destructive: "#f38ba8"
+  destructiveForeground: "#11111b"
+  success: "#a6e3a1"
+  warning: "#f9e2af"
+  border: "#45475a"
+  input: "#313244"
+  ring: "#cba6f7"

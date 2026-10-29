@@ -1,0 +1,102 @@
+# Catppuccin Mocha skin for the Hermes TUI / CLI.
+# Discovered at runtime from <hermes-home>/skins/*.yaml
+# (seeded by hermes/entrypoint.sh from the image copy).
+# Activated via `display.skin: catppuccin` in hermes/config.yaml.
+# Palette: https://github.com/catppuccin/palette (Mocha flavour).
+# Matches hermes/dashboard-themes/catppuccin.yaml.
+name: catppuccin
+description: Soothing pastel on dark Mocha — mauve accents, lavender highlights.
+
+colors:
+  background: "#1e1e2e"
+  banner_border: "#cba6f7"
+  banner_title: "#b4befe"
+  banner_accent: "#cba6f7"
+  banner_dim: "#6c7086"
+  banner_text: "#cdd6f4"
+  ui_accent: "#cba6f7"
+  ui_label: "#b4befe"
+  ui_ok: "#a6e3a1"
+  ui_error: "#f38ba8"
+  ui_warn: "#f9e2af"
+  prompt: "#cba6f7"
+  input_rule: "#45475a"
+  response_border: "#b4befe"
+  status_bar_bg: "#181825"
+  status_bar_text: "#a6adc8"
+  status_bar_strong: "#cba6f7"
+  status_bar_dim: "#6c7086"
+  status_bar_good: "#a6e3a1"
+  status_bar_warn: "#f9e2af"
+  status_bar_bad: "#fab387"
+  status_bar_critical: "#f38ba8"
+  session_label: "#b4befe"
+  session_border: "#45475a"
+  completion_menu_bg: "#181825"
+  completion_menu_current_bg: "#313244"
+  completion_menu_meta_bg: "#181825"
+  completion_menu_meta_current_bg: "#45475a"
+  selection_bg: "#45475a"
+  shell_dollar: "#89dceb"
+  voice_status_bg: "#181825"
+
+branding:
+  agent_name: Hermes Agent
+  welcome: "Welcome back, human — Hermes has claimed the warmest spot in your workspace. Type your message or /help for commands. (=^･ω･^=)"
+  goodbye: "Hermes curls up for a nap. Goodbye! (=^･ω･^=)"
+  response_label: " ☤ Hermes "
+  prompt_symbol: "\U0001F43E"
+  help_header: "(=^･ω･^=)? Available Commands"
+
+tool_prefix: "┊"
+
+spinner:
+  waiting_faces:
+    - "(=^･ω･^=)"
+    - "(=^･ｪ･^=)"
+    - "(=ↀωↀ=)"
+    - "(=^‥^=)"
+    - "(=^･^=)"
+  thinking_faces:
+    - "(=⌒‿‿⌒=)"
+    - "(=^･ω･^=)"
+    - "(=^‥^=)"
+    - "(=ↀωↀ=)"
+    - "(=ＴェＴ=)"
+  thinking_verbs:
+    - "purring through it"
+    - "kneading the problem"
+    - "pouncing on tokens"
+    - "chasing the cursor"
+    - "napping on the warm bytes"
+    - "stretching"
+    - "chirping on birds"
+    - "untangling yarn"
+  wings:
+    - ["⟪🐾", "🐾⟫"]
+    - ["⟪✦", "✦⟫"]
+    - ["⟪♡", "♡⟫"]
+    - ["⟪=^=", "=^=⟫"]
+
+banner_logo: |
+  [#cba6f7]       _._     _,-'""`-._    [/]
+  [#f5c2e7]      (,-.`._,'(       |\`-/|[/]
+  [#fab387]          `-.-' \ )-`( , o o)[/]
+  [#f9e2af]                `-    \`_`"'-[/]
+  [#9399b2]                             [/]
+
+
+banner_hero: |
+  [#cba6f7]⠀⠀⠀⠀⠀⠀⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⠀⠀⠀⠀⠀⠀[/]
+  [#cba6f7]⠀⠀⠀⠀⠀⢠⡏⢷⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⡾⢹⡄⠀⠀⠀⠀⠀[/]
+  [#b4befe]⠀⠀⠀⠀⠀⣾⠃⠀⠙⢷⣄⠀⢀⣀⣀⣀⣀⣀⣀⡀⠀⣠⡾⠋⠀⠘⣷⠀⠀⠀⠀⠀[/]
+  [#b4befe]⠀⠀⠀⠀⢰⣟⣤⣤⣤⣤⣽⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣯⣤⣤⣤⣤⣻⡆⠀⠀⠀⠀[/]
+  [#89dceb]⠀⠀⠀⠀⠁⠀⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣄⠀⠈⠀⠀⠀⠀[/]
+  [#89dceb]⠀⠀⠀⠀⢀⣾⣿⣿⣿⣿⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀[/]
+  [#a6e3a1]⠀⠀⠀⠀⢸⣿⣿⣿⡋⠀⠀⠀⠈⣻⣿⣿⣿⣿⣟⠁⠀⠀⠀⢙⣿⣿⣿⡇⠀⠀⠀⠀[/]
+  [#a6e3a1]⠀⠀⠀⠀⢐⣒⣿⣿⣿⣶⣦⣶⣾⣿⣿⣿⣿⣿⣿⣷⣶⣴⣶⣿⣿⣿⣒⡂⠀⠀⠀⠀[/]
+  [#a6e3a1]⠀⠀⠀⠀⠐⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣍⣩⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⠂⠀⠀⠀⠀[/]
+  [#a6e3a1]⠀⠀⠀⠀⠀⠈⠻⣿⣿⣿⣿⣿⣿⣿⣫⣵⣮⣝⣿⣿⣿⣿⣿⣿⣿⠟⠁⠀⠀⠀⠀⠀[/]
+  [#a6e3a1]⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠟⠁⠀⠀⠀⠀⠀⠀⠀[/]
+  [#a6e3a1]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠛⠛⠛⠛⠛⠛⠋⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀[/]
+  ⠀⠀⠀⠀⠀⠀⠀[bold #cba6f7]🐾[/] [bold #b4befe]H E R M E S[/] [bold #cba6f7]🐾[/]⠀⠀⠀⠀⠀⠀⠀⠀

@@ -1,0 +1,192 @@
+#!/bin/sh
+# opencode-delegate — keyless-only background launcher for Hermes → opencode delegation.
+#
+# Usage:
+#   opencode-delegate run <project_dir> <task_slug> "<prompt>" [model]
+#   opencode-delegate status <task_slug>
+#   opencode-delegate resume <task_slug> ["<extra prompt>"]
+#   opencode-delegate logs <task_slug> [N=30]
+#   opencode-delegate kill <task_slug>
+#
+# Keyless-only: <model> must be in the free allowlist below. Anything else is refused.
+# pai/* gateway models additionally require OPENCODE_ALLOW_GATEWAY=1 (fallback path,
+# ships disabled until proven). No credentials are ever configured or passed.
+set -u
+
+BIN="${OPENCODE_BIN:-opencode}"
+DATA_ROOT="${OPENCODE_DELEGATE_ROOT:-/opt/data/opencode}"
+DEFAULT_MODEL="opencode/muse-spark-1.3-contributor-free"
+ALLOW_MODELS="opencode/muse-spark-1.3-contributor-free opencode/muse-spark-1.2-contributor-free opencode/mimo-v2.5-free opencode/mimo-v2.6-flash-free opencode/ling-3.0-flash-fin-free opencode/nemotron-3-ultra-free opencode/nemotron-3.5-lightning-free opencode/big-pickle opencode/space-bunny-free opencode/jev-1.13-free opencode/deepseek-v4-flash-free opencode/gpt-5.3-codex-spark"
+
+die() { echo "opencode-delegate: ERROR: $*" >&2; exit 1; }
+
+command -v "$BIN" >/dev/null 2>&1 || die "opencode binary not found ($BIN) — image degraded, rebuild hermes"
+
+cmd="run"
+case "${1:-}" in
+  run|status|resume|logs|kill) cmd="$1"; shift ;;
+esac
+
+sanitize() { printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'; }
+
+check_model() {
+  m="$1"
+  for a in $ALLOW_MODELS; do
+    [ "$m" = "$a" ] && return 0
+  done
+  case "$m" in
+    pai/default|pai/local-*)
+      [ "${OPENCODE_ALLOW_GATEWAY:-0}" = "1" ] && return 0
+      die "gateway model '$m' refused (fallback disabled; set OPENCODE_ALLOW_GATEWAY=1 to opt in)" ;;
+  esac
+  die "model '$m' refused — not in keyless-free allowlist"
+}
+
+if [ "$cmd" = "status" ]; then
+  slug="$(sanitize "${1:?usage: opencode-delegate status <task_slug>}")"
+  meta="$DATA_ROOT/$slug/meta.json"
+  [ -f "$meta" ] || die "unknown task '$slug' (no $meta)"
+  python3 - "$meta" <<'EOF'
+import json, os, sys
+meta = json.load(open(sys.argv[1]))
+slug = os.path.basename(os.path.dirname(sys.argv[1]))
+out = os.path.join(os.path.dirname(sys.argv[1]), "out.jsonl")
+running = False
+try:
+    os.kill(int(meta.get("pid", 0)), 0)
+    running = True
+except Exception:
+    pass
+steps = inp = outp = 0
+last, sid = "", ""
+if os.path.exists(out):
+    for line in open(out, errors="replace"):
+        try: e = json.loads(line)
+        except Exception: continue
+        sid = sid or e.get("sessionID", "")
+        if e.get("type") == "step_finish":
+            steps += 1
+            t = e.get("part", {}).get("tokens", {})
+            inp += t.get("input", 0); outp += t.get("output", 0)
+        if e.get("type") == "text" and "part" in e:
+            last = e["part"].get("text", "")[:400]
+print(json.dumps({"slug": slug, "running": running, "model": meta.get("model"),
+      "branch": meta.get("branch"), "session": sid, "steps": steps,
+      "tokens_in": inp, "tokens_out": outp, "last_text": last}, indent=1))
+EOF
+  exit 0
+fi
+
+if [ "$cmd" = "resume" ]; then
+  slug="$(sanitize "${1:?usage: opencode-delegate resume <task_slug> [prompt]}")"
+  extra="${2:-Continue the task to completion.}"
+  tdir="$DATA_ROOT/$slug"
+  [ -f "$tdir/meta.json" ] || die "unknown task '$slug'"
+  sid="$(python3 - "$tdir" <<'EOF'
+import json, sys
+tdir = sys.argv[1]
+for l in open(tdir + '/out.jsonl', errors='replace'):
+    try:
+        s = json.loads(l).get('sessionID')
+        if s: print(s); break
+    except Exception: pass
+EOF
+)"
+  [ -n "$sid" ] || die "no session id found in $tdir/out.jsonl"
+  [ -f "$tdir/project" ] || die "task meta incomplete (no project record)"
+  proj="$(cat "$tdir/project")"
+  model="$(python3 - "$tdir" <<'EOF'
+import json, sys
+tdir = sys.argv[1]
+print(json.load(open(tdir + '/meta.json')).get('model',''))
+EOF
+)"
+  out="$tdir/resume-$(date +%s).jsonl"
+  cd "$proj" || die "cannot cd $proj"
+  nohup "$BIN" run --standalone --agent delegate --model "$model" \
+    --session "$sid" --format json --title "$slug-resume" "$extra" > "$out" 2>&1 &
+  echo "resumed task=$slug session=$sid pid=$! log=$out"
+  exit 0
+fi
+
+# --- logs ---
+if [ "$cmd" = "logs" ]; then
+  slug="$(sanitize "${1:?usage: opencode-delegate logs <task_slug> [N=30]}")"
+  n="${2:-30}"
+  tdir="$DATA_ROOT/$slug"
+  [ -d "$tdir" ] || die "unknown task '$slug'"
+  log=""
+  if [ -f "$tdir/out.jsonl" ]; then
+    log="$tdir/out.jsonl"
+  fi
+  # Check for resume-*.jsonl files (newest first)
+  for f in "$tdir"/resume-*.jsonl; do
+    [ -f "$f" ] && log="$f"
+  done
+  [ -n "$log" ] || die "no log file found for task '$slug'"
+  tail -n "$n" "$log"
+  exit 0
+fi
+
+# --- kill ---
+if [ "$cmd" = "kill" ]; then
+  slug="$(sanitize "${1:?usage: opencode-delegate kill <task_slug>}")"
+  meta="$DATA_ROOT/$slug/meta.json"
+  [ -f "$meta" ] || die "unknown task '$slug' (no $meta)"
+  pid="$(python3 - "$meta" <<'EOF'
+import json, sys
+print(json.load(open(sys.argv[1])).get('pid', 0))
+EOF
+)"
+  [ "$pid" -gt 0 ] 2>/dev/null || die "invalid pid in $meta"
+  was_running="no"
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null && was_running="yes"
+  fi
+  echo "was-running $was_running"
+  exit 0
+fi
+
+# --- run ---
+proj="${1:?usage: opencode-delegate run <project_dir> <task_slug> \"<prompt>\" [model]}"
+slug="$(sanitize "${2:?usage: opencode-delegate run <project_dir> <task_slug> \"<prompt>\" [model]}")"
+prompt="${3:?usage: opencode-delegate run <project_dir> <task_slug> \"<prompt>\" [model]}"
+model="${4:-$DEFAULT_MODEL}"
+check_model "$model"
+
+[ -d "$proj" ] || die "project dir missing: $proj"
+case "$proj" in
+  /opt/data/workspace/*|/opt/data/*) ;;
+  *) die "project dir outside /opt/data scope: $proj" ;;
+esac
+
+tdir="$DATA_ROOT/$slug"
+[ -e "$tdir" ] && die "task '$slug' exists — use a fresh slug (idempotency guard)"
+mkdir -p "$tdir" || die "cannot create $tdir"
+
+branch=""
+if git -C "$proj" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  branch="opencode/${slug}-$(date +%F)"
+  if git -C "$proj" rev-parse --verify "$branch" >/dev/null 2>&1; then
+    git -C "$proj" checkout "$branch" >/dev/null 2>&1 || die "cannot checkout $branch"
+  else
+    git -C "$proj" checkout -b "$branch" >/dev/null 2>&1 || die "cannot create $branch"
+  fi
+fi
+base="$(git -C "$proj" rev-parse HEAD 2>/dev/null || echo none)"
+
+cd "$proj" || die "cannot cd $proj"
+# shellcheck disable=SC2086
+nohup "$BIN" run --standalone --agent delegate --model "$model" \
+  --format json --title "$slug" "$prompt" > "$tdir/out.jsonl" 2>&1 &
+pid=$!
+
+python3 - "$tdir/meta.json" <<EOF
+import json
+json.dump({"slug": "$slug", "pid": $pid, "model": "$model", "project": "$proj",
+  "branch": "$branch", "base_sha": "$base",
+  "started": "$(date -u +%FT%TZ)"}, open("$tdir/meta.json", "w"), indent=1)
+EOF
+printf '%s' "$proj" > "$tdir/project"
+echo "launched task=$slug pid=$pid model=$model branch=${branch:-n/a} log=$tdir/out.jsonl"
+echo "poll: opencode-delegate status $slug"

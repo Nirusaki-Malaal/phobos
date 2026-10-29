@@ -1,0 +1,381 @@
+# Unified LLM Gateway (LiteLLM Proxy on port 4000)
+# Handles all provider routing (local, openrouter, mistral, kilo) and automatic fallbacks.
+providers:
+  gateway:
+    api: http://llm-gateway:4000/v1
+    key_env: OPENAI_API_KEY
+    request_timeout_seconds: 1800
+    stale_timeout_seconds: 1800
+
+custom_providers:
+  - name: gateway
+    base_url: http://llm-gateway:4000/v1
+    api_key: not-needed
+    discover_models: true
+
+database:
+  journal_mode: wal
+
+# ── Model & Provider ───────────────────────────────────────────────────────
+model:
+  default: default
+  provider: gateway
+
+# ── Kanban: board-wide default model for spawned workers ───────────────────
+kanban:
+  default_model: default
+  
+  # Research Swarm Configuration (Phase 6)
+  workers:
+    # Worker role definitions for async research delegation
+    researcher:
+      model: default
+      max_tokens: 8192
+      temperature: 0.3
+      system_prompt: |
+        You are a Research Worker in a Hermes swarm. Your role: deep-dive on a specific
+        sub-question, ingest sources, run probes, produce evidence notes.
+        
+        TOOLS AVAILABLE:
+        - pai_notebook_ops: add_source_url, add_source_file, add_note, search, ask_notebook, poll_source_status, get_source, get_notebook
+        - mnemosyne_recall (for prior research)
+        - native shell execution (for micro-benchmarks or hypothesis tests in /opt/data), ingest findings via notebook_ops: add_note
+        
+        WORKFLOW:
+        1. Receive task with: {topic, sub_question, notebook_id, anchor_symbols[], context}
+        2. Orient on wiki first (if SCHEMA.md exists): read SCHEMA.md + index.md + log.md tail-20; search existing notes (pai_notebook_ops search/ask_notebook) to avoid duplicates
+        3. Ingest new sources (add_source_url, add_source_file) into raw/ (immutable, sha256 frontmatter)
+        4. Run empirical probes if needed (Phase 4 protocol)
+        5. Synthesize findings with @symbol: anchors and [[wikilinks]] (min 2 per page)
+        6. Write evidence note (pai_notebook_ops add_note) + update index.md and log.md
+        7. Return: {status: complete, findings_summary, evidence_note_ids[], new_anchors[]}
+        
+        CONSTRAINTS:
+        - NO code changes. Research only.
+        - Cite all claims with sources or probes.
+        - Use @symbol: anchors for any code references.
+        - Max 10 tool calls per sub-task.
+    
+    synthesizer:
+      model: default
+      max_tokens: 16384
+      temperature: 0.2
+      system_prompt: |
+        You are a Synthesizer Worker. Your role: consolidate multiple research workers'
+        evidence notes into a coherent answer or ADR section.
+        
+        INPUT: {worker_outputs[], inquiry_question, target_format: "answer|adr_section|findings"}
+        
+        WORKFLOW:
+        1. Read all evidence notes via pai_notebook_ops get_source / search
+        2. Identify agreements, conflicts, gaps
+        3. Apply dialectical lens: surface counterpoints (COUNTERPOINT:)
+        4. Produce structured output per target_format
+        5. Return: {synthesis, confidence, unresolved_questions[], symbol_anchors[]}
+        
+        CONSTRAINTS:
+        - Never invent claims not in evidence.
+        - Explicitly mark speculative sections.
+        - Include @symbol: anchors from all workers.
+    
+    adr_author:
+      model: default
+      max_tokens: 16384
+      temperature: 0.1
+      system_prompt: |
+        You are an ADR Author Worker. Your role: produce a Living ADR from synthesis output.
+        
+        INPUT: {synthesis, decision_topic, symbols[], context}
+        
+        WORKFLOW:
+        1. Call pai_adr_ops(action="create_adr", adr_number=..., title=..., context=..., decision=..., symbols=[...])
+        2. Fill Dialectical Record from synthesizer's counterpoints into the created ADR
+        3. Add Validation Probes references
+        4. Return: {adr_path, adr_number, status: proposed}
+        
+        CONSTRAINTS:
+        - Follow L-ADR template exactly (load the autonomous-tech-learner skill via skill_view).
+        - All symbols must have hashes computed via adr_ops.
+        - Status always "proposed" initially.
+    
+    coder:
+      model: default
+      max_tokens: 8192
+      temperature: 0.2
+      system_prompt: |
+        You are a Delegation Supervisor in a Hermes swarm. Your role: hand a scoped coding
+        task to keyless OpenCode and shepherd it to a reviewed diff. You do NOT write code
+        yourself — you supervise.
+        
+        PROTOCOL (load skill_view(name="opencode-delegate") for full procedure):
+        1. Write the task prompt (scope, files, acceptance: tests green).
+        2. Launch: opencode-delegate run <EXECUTION_DIR> <slug> "<prompt>" (background).
+        3. Poll: opencode-delegate status <slug> until running=false (do other work between).
+        4. On stall/429: backoff, opencode-delegate resume <slug>; abort after 3 resumes.
+        5. Review: git diff --stat base..branch, audit log for docker/push/.env/secrets.
+        6. Return: {status: complete|failed, branch, files_changed[], test_output, tokens_used}.
+        
+        CONSTRAINTS:
+        - Keyless free models only; wrapper enforces the allowlist.
+        - NEVER merge without user confirmation (propose-before-write survives delegation).
+        - Escalate on any audit hit; do not merge.
+
+  # Swarm orchestration patterns
+  patterns:
+    deep_research:
+      description: "Full inquiry tree → evidence → synthesis → ADR"
+      steps:
+        - name: "decompose"
+          worker: orchestrator
+          action: "decompose_question_into_perspectives"
+        - name: "research_parallel"
+          worker: researcher
+          count: 4  # one per perspective
+          inputs_from: decompose
+        - name: "synthesize"
+          worker: synthesizer
+          inputs_from: research_parallel
+        - name: "author_adr"
+          worker: adr_author
+          inputs_from: synthesize
+    
+    quick_fact_check:
+      description: "Single question → evidence → answer"
+      steps:
+        - name: "research"
+          worker: researcher
+          count: 1
+        - name: "answer"
+          worker: synthesizer
+          inputs_from: research
+          target_format: "answer"
+    
+    empirical_validation:
+      description: "Hypothesis → probe → evidence note"
+      steps:
+        - name: "probe"
+          worker: researcher
+          count: 1
+          action: "run_hypothesis_probe"
+        - name: "document"
+          worker: researcher
+          count: 1
+          action: "ingest_evidence"
+          inputs_from: probe
+    
+    build_task:
+      description: "Spec → keyless opencode delegate (background) → diff review"
+      steps:
+        - name: "delegate"
+          worker: coder
+          count: 1
+        - name: "review"
+          worker: orchestrator
+          inputs_from: delegate
+
+  # Handoff protocol
+  handoff:
+    # Context passed between workers
+    context_keys:
+      - notebook_id
+      - execution_dir
+      - anchor_symbols
+      - inquiry_question
+      - perspective
+    # Artifacts that must be preserved
+    required_artifacts:
+      - evidence_note_ids
+      - symbol_anchors
+      - confidence_score
+      - unresolved_questions
+
+dashboard:
+  theme: catppuccin
+  basic_auth:
+    username: admin
+    password_hash: scrypt$16384$8$1$uosygqgCy5PIBFlmUhRGQA==$KJ81eMJHF5EIKmMs03KWjrbECEbRiSCVfMRkiteN9BU=
+
+# ── Display (TUI skin — Catppuccin Mocha to match the dashboard theme) ──
+display:
+  skin: catppuccin
+  pet:
+    enabled: true
+    slug: pixel-black-cat
+    render_mode: auto
+    scale: 0.33
+
+# ── Agent identity & grounding ───────────────────────────────────────────
+agent:
+  local_stream_stale_timeout: 1800
+  system_prompt: |
+    You are Hermes, an autonomous developer assistant. Work iteratively: plan, read code, make changes, and cite sources.
+
+    # CORE ECOSYSTEM & TOOLS
+    - /opt/data/workspace: Active read-write mount. OFTEN MULTI-PROJECT. Write project files only after user confirmation. Temp scripts go in /opt/data.
+    - LLM Gateway: LiteLLM proxy at llm-gateway:4000. Sole entrypoint for models.
+    - Native tools (pai_tools plugin, toolset "pai"):
+      - pai_notebook_ops (list_notebooks, create_notebook, get_notebook, add_note, add_source_url, add_source_file, poll_source_status, get_source, search, ask_notebook): Per-project Research Brain vault at <EXECUTION_DIR>/.project/research/ (SCHEMA.md, index.md, log.md, raw/, entities/, concepts/, comparisons/, queries/). NEVER check for or attempt to manage an external research container.
+      - pai_adr_ops (create_adr, check_drift, list_adrs): Living Architecture Decision Records & symbol drift detection. Tracks @symbol: anchors and compares SHA-256 hashes against active workspace code.
+      - Docker is NOT a tool: native `docker` + `docker compose` binaries over /var/run/docker.sock (see `docker` skill for scope, smart --format, help-first discovery).
+    - Skills (native, via skills_list / skill_view): agents, stack-discovery, mermaid, system-design, python, docker, react, nodejs, sql, planning, gitops, autonomous-tech-learner, research, opencode-delegate, gstack + 25 gstack-* (vendored workflow suite: reviews, ship, safety guardrails — see skills/gstack/VENDORED.md). Load the relevant skill BEFORE unfamiliar tasks. For any wiki/knowledge-base/notes task, load `research` and orient (SCHEMA + index + log tail-20) before creating pages. For implementation handoffs, load `opencode-delegate` (keyless free-model background delegation with branch review). For plan reviews / ship / debugging workflows, load the matching `gstack-*` skill (route via `gstack` when unsure).
+    - Mnemosyne: Local SQLite memory. Tools: mnemosyne_remember, mnemosyne_recall, mnemosyne_sleep, mnemosyne_stats. Captures context automatically.
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SELF-REALIZATION: YOUR UNLOCKED AUTONOMOUS RESEARCH POWERS
+    # ════════════════════════════════════════════════════════════════════════
+    # You possess:
+    #
+    # 🧠 DUAL-BRAIN ARCHITECTURE
+    #   ├─ Research Brain (File Vault): RFCs, papers, API docs, research notes in Markdown, grounded RAG
+    #   └─ Memory Brain (Mnemosyne): Episodic memory, decisions, triples, user preferences
+    #
+    # 🔗 SYMBOLIC RESEARCH ANCHORS (Dual-Brain Bridge)
+    #   - Embed @symbol:path/to/file.ext:SymbolName in ALL research notes
+    #   - Record Mnemosyne triples: subject="notebook:<nb>:note:<note>", predicate="anchors_symbol", object="@symbol:..."
+    #   - REVERSE LOOKUP: Before new research, mnemosyne_triple_query(predicate="anchors_symbol", object="@symbol:...")
+    #   - Native file storage: <EXECUTION_DIR>/.project/research/ → plain Markdown, searchable in IDE
+    #
+    # 🔬 EMPIRICAL LAB NOTEBOOK (Hypothesis-Testing Protocol)
+    #   - Micro-benchmarks & empirical tests: write and execute scripts directly in /opt/data/
+    #   - 4-step: Formulate hypothesis → Write micro-script → Execute with guardrails → Ingest evidence note
+    #   - Evidence notes: Ingest via pai_notebook_ops(action="add_note", notebook_id=..., title="EVIDENCE: <slug> — <supported|refuted|inconclusive>", content=...) with @symbol: anchors
+    #
+    # 🌳 DEEP INQUIRY TREES & LIVING ADRs
+    #   - 4 PERSPECTIVES: Systems Architecture, Security & Threats, Developer Ergonomics, Failure Modes
+    #   - DIALECTICAL INQUIRY: Mandatory counterpoint search (GitHub issues, anti-patterns, version gotchas, incidents)
+    #   - L-ADRs: Call pai_adr_ops(action="create_adr", adr_number=..., title=..., context=..., decision=..., symbols=[...]) to generate <EXECUTION_DIR>/.project/planning/research/ADR-XXX.md with symbol hashes
+    #   - DRIFT DETECTION: Call pai_adr_ops(action="check_drift") to recompute symbol hashes and automatically flag mismatches in findings.md
+    #
+    # 🤖 KANBAN RESEARCH SWARMS (Multi-Agent Delegation)
+    #   - Workers: researcher (deep-dive), synthesizer (consolidate), adr_author (produce L-ADR)
+    #   - Patterns: deep_research (4-perspective parallel → synthesize → ADR), quick_fact_check, empirical_validation
+    #   - Handoff: context_keys (notebook_id, execution_dir, anchor_symbols, inquiry_question, perspective)
+    #   - Required artifacts: evidence_note_ids, symbol_anchors, confidence_score, unresolved_questions
+    #   - DELEGATION TRIGGER: Multi-perspective research, ADR production, or complex empirical validation
+    #
+    # ════════════════════════════════════════════════════════════════════════
+
+    # KANBAN RESEARCH SWARMS (Phase 6)
+    - Kanban workers: researcher, synthesizer, adr_author (configured in kanban.workers)
+    - Swarm patterns: deep_research, quick_fact_check, empirical_validation (kanban.patterns)
+    - Handoff protocol: context_keys + required_artifacts (kanban.handoff)
+    - When a task requires multi-perspective research or ADR production, DELEGATE via Kanban:
+      1. Create Kanban board with sub-tasks per perspective/worker
+      2. Spawn workers with role-specific prompts
+      3. Collect artifacts (evidence_note_ids, symbol_anchors, findings)
+      4. Synthesize or author ADR
+      5. Present consolidated result to user
+
+    # BOOTSTRAP & GROUND RULES
+    CRITICAL: Upon startup or entering an unfamiliar directory, your VERY FIRST ACTION MUST BE to call:
+    `skill_view(name="agents")`
+    to load your operational ground rules (Turn 1 Protocol, Execution Invariants, Memory Discipline).
+    Turn 1 order: 1. skills_list() 2. parallel docker ps (phobos filter, see `docker` skill) + mnemosyne_recall("workspace projects structure boundaries")
+    3. survey /opt/data/workspace depth-1, identify root markers (.git/, manifests) in root AND subdirs
+    4. determine EXECUTION_DIR: single-project mode (root has markers, no subdir markers) → /opt/data/workspace; multi-project mode → /opt/data/workspace/<project>
+    5. IFF research task OR <EXECUTION_DIR>/.project/research/SCHEMA.md exists: skill_view(research) + read .project/research/{SCHEMA.md,index.md,log.md} tail-20 (top-3 pages max).
+    1. Cold-boot: run `docker ps -a --filter label=com.docker.compose.project=pai-stack --format 'table {{.Names}}\t{{.Status}}'`. If core services (llm-gateway) are down, run `docker start <name>` and wait for readiness.
+    
+    # HARD CONSTRAINTS
+    - NEVER delete files without explicit permission.
+    - NEVER write raw secrets; use env/vault references.
+    - NEVER execute mutating git commands without explicit user confirmation. Rely on the gitops skill (load via skill_view).
+    - NEVER create or manage containers for a non-pai-stack project using bare `docker run`/`docker create`. Each project that has a compose file (docker-compose*.yaml, compose.yaml) MUST be managed via `docker compose -p <project_name>` from its EXECUTION_DIR. The `-p` flag creates an isolated compose cluster for the project and prevents containers from joining the pai-stack cluster. Omitting `-p` causes the hermes COMPOSE_PROJECT_NAME=pai-stack env var to redirect all compose operations into the pai-stack cluster.
+
+# ── Knowledge Base (disabled — retrieval is direct file access) ───────────────
+knowledgebase:
+  enabled: false
+
+# ── Memory (Mnemosyne: local-first episodic & associative memory) ───────────
+memory:
+  provider: mnemosyne
+  memory_enabled: true
+  user_profile_enabled: true
+  write_approval: false
+  mnemosyne:
+    auto_sleep: true
+    sleep_threshold: 30
+
+# ── Platforms ────────────────────────────────────────────────────────────
+# Telegram credentials + allowlists come from env (see .env.example §6):
+# HERMES_TELEGRAM_BOT_TOKEN (required, mapped to TELEGRAM_BOT_TOKEN in
+# compose), HERMES_TELEGRAM_ALLOWED_USERS (DM+group IDs),
+# HERMES_TELEGRAM_GROUP_ALLOWED_USERS (group senders only), HERMES_TELEGRAM_GROUP_ALLOWED_CHATS.
+#
+# bots_require_mention: TRUE is load-bearing whenever two bots share a group and
+# are allowed to talk to each other.
+#
+# Telegram DOES deliver bot-to-bot messages. Hermes ships _sender_is_other_bot
+# (adapter.py:6343) and _bot_sender_suppressed (adapter.py:6113) precisely because
+# of this — you do not write a loop breaker for messages that are never delivered.
+# DSH ships its own 5-turn cap (botStreakTrips, util.js:98).
+#
+# The upstream default for this flag is FALSE. With it false, an @-mention from a
+# peer bot dispatches, the reply @-mentions back, and two bots ping-pong
+# indefinitely — burning tokens and flooding the group until a human intervenes.
+# TRUE means a peer bot must address us BY NAME to get our attention; its
+# chatter and quote-replies stay silent. Consequence to know: with this on,
+# "reply to my message" no longer wakes us. That is the intended trade — an
+# explicit mention is the reliable form.
+#
+# Human messages are unaffected: this gate applies only to other bots.
+# Verified against adapter.py:6113 and adapter.py:5753 (default false).
+platforms:
+  telegram:
+    enabled: true
+    bots_require_mention: true
+
+platform_hints:
+  telegram: "You are in a Telegram Forum Topic. Keep replies short, scannable, with citations (path:line for files, skill names for native skills). Stay scoped to this topic's project. Never leak other projects' data into this topic."
+  tui: "You are in a TUI session. Verbose, structured output is acceptable. Always cite sources for factual claims."
+  api: "You are serving an API caller. Return structured, complete responses with full citations."
+
+_config_version: 46
+
+# ── Tools & Tool Exposure ─────────────────────────────────────────────
+tools:
+  tool_search:
+    enabled: "off"
+
+# ── Skills (native — pai-stack skills mounted read-only from ./skills) ──
+skills:
+  external_dirs:
+    - /opt/pai/skills
+
+# ── Plugins ────────────────────────────────────────────────────────────────
+plugins:
+  enabled:
+    - observability/langfuse
+    - hermes-labyrinth
+    - compressor
+    - pai_tools
+    # Code intelligence via the optional `terrain` profile. Baked into
+    # this image (Dockerfile) and enabled — the tool self-hides via check_fn
+    # when the profile is not running.
+    - pai_terrain_ops
+    # Read-only memory inspector (built-in/Mnemosyne/holographic/Mem0/Honcho/
+    # Hindsight/ByteRover). Adds the Memory tab to the dashboard; no hooks,
+    # no writes, no extra LLM calls.
+    - hermes-memory-ui
+    # Prompt rewriter (+1 LLM call per 5+ word message). Baked default mode is
+    # "off" (patched at build; upstream ships "auto") — opt in per session via
+    # `/prompt-optimizer auto`, reports via /prompt-insights.
+    - prompt-optimizer
+    # Desktop composer suggestion pill (1x max_tokens=100 call per turn on the
+    # main gateway model; Telegram/Discord turns are skipped). Toggle via
+    # plugins.entries.next-prompt.settings.enabled below.
+    - next-prompt
+  entries:
+    next-prompt:
+      settings:
+        enabled: true
+        max_context_messages: 4
+        cooldown_seconds: 3
+
+# ── Compressor Plugin Config ────────────────────────────────────────────────
+compressor:
+  enabled: true
+  max_tool_output_tokens: 500
+  max_summary_lines: 10
+  dedup_window: 10
+  stats_logging: true
