@@ -1,0 +1,24 @@
+{
+  "name": "dsh-pai-notebook",
+  "version": "0.2.0",
+  "description": "DSH plugin for Research Brain notebook operations. Provides `pai_notebook_ops` tool to manage a per-project research vault in .project/research/. Actions: list_notebooks, create_notebook, get_notebook, add_note, add_source_url, add_source_file, poll_source_status, get_source, search, ask_notebook. Use for persistent research vaults per project.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+- insert:
+    - id: pai-design
+      name: dsh-pai-design
+      config:
+        enabled: true

@@ -1,0 +1,5 @@
+- insert:
+    - id: pai-adr
+      name: dsh-pai-adr
+      config:
+        enabled: true

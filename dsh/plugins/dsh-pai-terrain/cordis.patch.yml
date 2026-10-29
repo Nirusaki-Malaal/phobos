@@ -1,0 +1,5 @@
+- insert:
+    - id: pai-terrain
+      name: dsh-pai-terrain
+      config:
+        enabled: true

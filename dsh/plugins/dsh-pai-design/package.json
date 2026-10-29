@@ -1,0 +1,24 @@
+{
+  "name": "dsh-pai-design",
+  "version": "0.2.0",
+  "description": "DSH plugin for OpenDesign integration. Connects to OpenDesign API for project management, folder imports, and design collaboration. Use `pai_design_ops` tool with actions: health, list_projects, get_project, create_project, import_folder, get_status.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
