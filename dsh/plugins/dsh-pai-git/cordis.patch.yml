@@ -1,0 +1,5 @@
+- insert:
+    - id: pai-git
+      name: dsh-pai-git
+      config:
+        enabled: true

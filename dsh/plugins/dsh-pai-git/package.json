@@ -1,0 +1,24 @@
+{
+  "name": "dsh-pai-git",
+  "version": "0.2.0",
+  "description": "DSH plugin for git operations with worktree support. Provides `pai_git_ops` tool with actions: status, log, diff, branch, checkout, commit, push, pull, merge, rebase, stash, tag, remote, config, worktree_create, worktree_list, worktree_remove. Run git commands safely within the workspace.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
