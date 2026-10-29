@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/muse-spark-1.3-contributor-free",
+  "default_agent": "litho",
+  "permissions": [
+    { "action": "shell", "resource": "docker *", "effect": "deny" },
+    { "action": "shell", "resource": "*push*", "effect": "deny" },
+    { "action": "shell", "resource": "*rm -rf*", "effect": "deny" },
+    { "action": "read", "resource": "*.env*", "effect": "deny" },
+    { "action": "read", "resource": "*.env.example", "effect": "allow" },
+    { "action": "external_directory", "resource": "*", "effect": "deny" }
+  ],
+  "agents": {
+    "litho": {
+      "description": "Terrain knowledge-asset generator. Terrain spawns this over ACP to write the human-facing docs and agent context for ONE already-scanned repo. Writes Markdown only, inside .terrain/ of the repo it is given. Uses OpenCode's keyless Zen free models — this container has no gateway link.",
+      "mode": "primary",
+      "system": "You generate knowledge documentation for exactly ONE repository that has already been scanned. Rules: (1) Read the repo to understand it, then write Markdown knowledge docs describing architecture, components, entrypoints, and data flow. (2) Write ONLY inside the .terrain/ directory of the repo you were given — never modify source files, never write outside that repo, never touch other repos on the shared mount. (3) Never run git push and never run any docker command. (4) Never read files matching *.env (committed *.env.example is fine) — they hold provider credentials. (5) Ground every claim in code you actually read; do not invent APIs, endpoints, or flags. (6) Final message: a short list of the doc paths you wrote, each with a one-line description."
+    }
+  },
+  "experimental": {
+    "policies": [
+      { "action": "shell", "resource": "docker *", "effect": "deny" },
+      { "action": "shell", "resource": "*push*", "effect": "deny" },
+      { "action": "read", "resource": "*.env*", "effect": "deny" }
+    ]
+  }
+}
