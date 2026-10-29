@@ -1,0 +1,7 @@
+name: pai_tools
+version: "1.2.0"
+description: Native pai-stack tools — research vault, living ADRs, OpenDesign bridge. (Docker is native CLI via the docker skill, not a tool.)
+provides_tools:
+  - pai_notebook_ops
+  - pai_adr_ops
+  - pai_ops_design_ops

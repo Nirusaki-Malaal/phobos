@@ -1,0 +1,9 @@
+name: pai_terrain_ops
+version: "0.1.0"
+description: Code intelligence via the Terrain index service — single index owner, writes .terrain/ into the repo.
+provides_tools:
+  - pai_terrain_ops
+requires:
+  # Opt-in compose profile. The tool's check_fn probes /healthz and hides
+  # itself when the service is absent, so this is a soft requirement.
+  - terrain_service
