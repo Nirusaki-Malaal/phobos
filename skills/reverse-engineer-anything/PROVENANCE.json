@@ -1,0 +1,18 @@
+{
+  "name": "reverse-engineer-anything",
+  "repo": "morluto/rea",
+  "revision": "6fa48f201f932c6c12b540ee9799895a0a436d00",
+  "path": ".agents/skills/reverse-engineer-anything",
+  "description": "REA binary native JavaScript firmware reverse engineering",
+  "sha256": {
+    "SKILL.md": "cbe7c0e94e1cc130ff8d2b9c7a3c4c585a010c572c384eb6948c136b00bdd485",
+    "references/android-applications.md": "1698a9a21eacc685b327059efee2e9cdb6ac1f55fa3875eed96b4b304ab155f3",
+    "references/connection-and-recovery.md": "69aae4c8c2741cc745171a007257cf94fa65247bf73e4c4eb031a1361a06831e",
+    "references/environments.md": "4a84b3be1eb36b1d2e658b4076b151570ba97a60e7d97da0876ab324c917b305",
+    "references/evidence-workflows.md": "bfa94989199029b93f297cc373dca96770056da8e7d5586a895f22a4a09a8fe7",
+    "references/javascript-applications.md": "15ae2177ef1c41e25095238c64b38f34d8ea53ea3c4c74f627096f90b8eaa54b",
+    "references/native-and-artifacts.md": "51296b229b6cbe02a4be507a907e0ec75c8ce9270d895cd62ba6986245beb896",
+    "references/runtime-observation.md": "e207a912470a1a56dc02316eb7b040ac50b4d763f2273e97a6811863d9051d74"
+  },
+  "scripts_executed": false
+}
