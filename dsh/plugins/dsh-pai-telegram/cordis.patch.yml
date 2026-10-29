@@ -1,0 +1,11 @@
+# dsh-pai-telegram bundle patch — host-only, no client bundle.
+# One insert row; config holds non-secret defaults only (token via env).
+- insert:
+    - id: telegram
+      name: dsh-pai-telegram
+      config:
+        enabled: true
+        mode: rich
+        approvalTimeoutMinutes: 10
+        # dataDir defaults to $DSH_HOME/storages/telegram (offset + bindings).
+        dataDir: ""
