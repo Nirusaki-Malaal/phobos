@@ -1,0 +1,220 @@
+# LiteLLM Proxy Configuration for pai-stack
+# Centralized LLM gateway managing all model routing and provider credentials.
+# NOTE: routes use mistral/ provider mapping (not openai/) so reasoning params
+# are stripped pre-flight — see note at primary-models section below.
+# NOTE: model entries are alphabetically sorted (case-insensitive) — do not
+# hand-reorder; re-running scripts/sync-models.py regenerates this order.
+# NOTE: the `default` entry + fallback chain below are latency-ranked
+# (fastest probe first) — re-ranked on every run.
+
+model_list:
+  # ── Kilo Gateway ───────────────────────────────────────────────────
+  - model_name: kilo/dots-studio/dots-3-note-preview:free
+    litellm_params:
+      model: mistral/dots-studio/dots-3-note-preview:free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_GATEWAY_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  - model_name: kilo/kilo-auto/free
+    litellm_params:
+      model: mistral/kilo-auto/free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_GATEWAY_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  - model_name: kilo/liquid/lfm-2.5-2.6b:free
+    litellm_params:
+      model: mistral/liquid/lfm-2.5-2.6b:free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_GATEWAY_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  - model_name: kilo/nvidia/nemotron-3-ultra-550b-a55b:free
+    litellm_params:
+      model: mistral/nvidia/nemotron-3-ultra-550b-a55b:free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_GATEWAY_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  - model_name: kilo/nvidia/nemotron-3.5-lightning:free
+    litellm_params:
+      model: mistral/nvidia/nemotron-3.5-lightning:free
+      api_base: https://api.kilo.ai/api/gateway
+      api_key: os.environ/KILO_GATEWAY_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  # ── Mistral AI ───────────────────────────────────────────────────
+  - model_name: mistral/codestral-2508
+    litellm_params:
+      model: mistral/codestral-2508
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/codestral-latest
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/ministral-14b-2512
+    litellm_params:
+      model: mistral/ministral-14b-2512
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/ministral-14b-latest
+    litellm_params:
+      model: mistral/ministral-14b-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/ministral-3b-2512
+    litellm_params:
+      model: mistral/ministral-3b-2512
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/ministral-3b-latest
+    litellm_params:
+      model: mistral/ministral-3b-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/ministral-8b-2512
+    litellm_params:
+      model: mistral/ministral-8b-2512
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/ministral-8b-latest
+    litellm_params:
+      model: mistral/ministral-8b-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/mistral-code-fim-latest
+    litellm_params:
+      model: mistral/mistral-code-fim-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/mistral-code-latest
+    litellm_params:
+      model: mistral/mistral-code-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/voxtral-small-2507
+    litellm_params:
+      model: mistral/voxtral-small-2507
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  - model_name: mistral/voxtral-small-latest
+    litellm_params:
+      model: mistral/voxtral-small-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+  # ── OpenRouter ───────────────────────────────────────────────────
+  - model_name: openrouter/cohere/north-mini-code:free
+    litellm_params:
+      model: openrouter/cohere/north-mini-code:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/dots-studio/dots-3-note-preview:free
+    litellm_params:
+      model: openrouter/dots-studio/dots-3-note-preview:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/free
+    litellm_params:
+      model: openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/liquid/lfm-2.5-2.6b:free
+    litellm_params:
+      model: openrouter/liquid/lfm-2.5-2.6b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/nvidia/nemotron-3.5-content-safety:free
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3.5-content-safety:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/nvidia/nemotron-3.5-lightning:free
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3.5-lightning:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  - model_name: openrouter/poolside/laguna-xs-2.1:free
+    litellm_params:
+      model: openrouter/poolside/laguna-xs-2.1:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 1800
+
+  # ── Upstream Language Models (Clean Canonical Names) ──────────────────
+  - model_name: qwen3.8-27b-uncensored
+    litellm_params:
+      model: mistral/qwen3.8-27b-uncensored
+      api_base: os.environ/OPENAI_COMPATIBLE_BASE_URL
+      api_key: os.environ/OPENAI_COMPATIBLE_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  - model_name: spark-x2.5-4b-uncensored
+    litellm_params:
+      model: mistral/spark-x2.5-4b-uncensored
+      api_base: os.environ/OPENAI_COMPATIBLE_BASE_URL
+      api_key: os.environ/OPENAI_COMPATIBLE_API_KEY
+      timeout: 1800
+      drop_params: true
+
+  # ── Default (fastest live model first, rest via fallbacks) ────────────
+  - model_name: default
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY
+      timeout: 1800
+
+# ── Router Settings ─────────────────────────────────────────────────────
+router_settings:
+  timeout: 1800              # 30m request timeout for large models & deep reasoning
+  stream_timeout: 1800       # 30m chunk timeout for slow reasoning token streams
+  fallbacks:
+    - {"default": ["mistral/mistral-code-latest", "mistral/ministral-3b-2512", "mistral/ministral-3b-latest", "openrouter/nvidia/nemotron-3-super-120b-a12b:free", "openrouter/liquid/lfm-2.5-2.6b:free", "kilo/liquid/lfm-2.5-2.6b:free", "mistral/voxtral-small-latest", "openrouter/nvidia/nemotron-3.5-content-safety:free", "kilo/nvidia/nemotron-3.5-lightning:free", "openrouter/cohere/north-mini-code:free", "mistral/ministral-8b-latest", "mistral/ministral-8b-2512", "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "mistral/ministral-14b-latest", "mistral/codestral-2508", "mistral/voxtral-small-2507", "kilo/kilo-auto/free", "mistral/ministral-14b-2512", "openrouter/nvidia/nemotron-3.5-lightning:free", "spark-x2.5-4b-uncensored", "mistral/mistral-code-fim-latest", "openrouter/dots-studio/dots-3-note-preview:free", "openrouter/poolside/laguna-xs-2.1:free", "kilo/dots-studio/dots-3-note-preview:free", "openrouter/free", "kilo/nvidia/nemotron-3-ultra-550b-a55b:free", "qwen3.8-27b-uncensored", "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"]}
+
+# ── General Settings ─────────────────────────────────────────────────────
+general_settings:
+  drop_params: true
+  request_timeout: 1800      # 30m global HTTP timeout

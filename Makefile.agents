@@ -1,0 +1,282 @@
+# Phobos — AI agent dev environment (Hermes + LLM Gateway + optional services)
+# Full reference: docs/operations.md
+
+
+
+.PHONY: agents-help check-workspace \
+	gateway-up gateway-down gateway-logs gateway-config gateway-build gateway-clean \
+	hermes-up hermes-down hermes-logs hermes-config hermes-build hermes-clean \
+	all-up all-down all-clean \
+	design-up design-down design-logs design-config design-build design-perms design-import \
+	dsh-up dsh-down dsh-logs dsh-config dsh-build dsh-perms dsh-sync-models dsh-ensure-web dsh-password dsh-clean dsh-versions-check \
+	terrain-up terrain-down terrain-logs terrain-config terrain-build terrain-perms terrain-index terrain-ask \
+	sync sync-dry
+
+# ── Environment & Variables ──
+
+# Helper to extract a variable from .env safely
+ext_env = $(shell grep -E '^$1=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+
+WORKSPACE_DIR ?= $(or $(call ext_env,WORKSPACE_DIR),$(call ext_env,PHOBOS_WORKSPACE_DIR),./workspace)
+# Expand a leading ~ using shell tilde expansion on the host environment
+WORKSPACE_DIR := $(shell echo $(WORKSPACE_DIR))
+export WORKSPACE_DIR
+
+# Host UID:GID so bind-mounted files stay owned by you. Override: `make up UID=1000 GID=1000`.
+UID ?= $(shell id -u)
+GID ?= $(shell id -g)
+export UID
+export GID
+
+# Docker socket GID for dsh `group_add` (host daemon reuse).
+DOCKER_GID ?= $(shell stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)
+export DOCKER_GID
+
+# Single compose file — profiles control optional services
+COMPOSE := docker compose -p $(COMPOSE_PROJECT_NAME) -f compose.yaml
+
+# Profile flags
+PROFILE_GATEWAY := --profile gateway
+PROFILE_HERMES := --profile hermes
+PROFILE_TERRAIN := --profile terrain
+PROFILE_DSH := --profile dsh
+PROFILE_DESIGN := --profile design
+ALL_PROFILES := --profile gateway --profile hermes --profile terrain --profile dsh --profile design
+
+COMPOSE_PROJECT_NAME = phobos
+export COMPOSE_PROJECT_NAME
+
+# Volume names (project-prefixed)
+HERMES_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_hermes-data
+TERRAIN_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_terrain_data
+DSH_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_dsh_data
+DSH_TOOLCHAINS_VOLUME := $(COMPOSE_PROJECT_NAME)_dsh_toolchains
+DESIGN_VOLUME := $(COMPOSE_PROJECT_NAME)_open_design_data
+
+# ── Help ──
+
+# Auto-generated agents-help: extracts target: ## description lines and section headers (# ── Section ──)
+agents-help: ## Show this help message
+	@echo "\033[1mPhobos\033[0m — AI Agent Development Environment"
+	@echo ""
+	@awk -F'##' ' \
+		/^#[[:space:]]*──[[:space:]]*(.+)[[:space:]]*──/ { \
+			section = substr($$0, match($$0, /──[[:space:]]*(.+)[[:space:]]*──/)+3); \
+			gsub(/^[[:space:]]*#[[:space:]]*|[[:space:]]*──.*$$/, "", section); \
+			print "\033[1;34m" section "\033[0m"; \
+			next \
+		} \
+		/^[a-zA-Z0-9_-]+:.*##/ { \
+			split($$1, a, ":"); \
+			target = a[1]; \
+			desc = $$2; \
+			gsub(/^[[:space:]]+|[[:space:]]+$$/, "", target); \
+			gsub(/^[[:space:]]+|[[:space:]]+$$/, "", desc); \
+			printf "  \033[36m%-18s\033[0m %s\n", target, desc \
+		} \
+		END { print ""; print "Full reference: docs/operations.md" } \
+	' $(MAKEFILE_LIST)
+
+# ── Workspace Guard ──
+
+check-workspace:
+	@if [ ! -f .env ]; then \
+		echo "\033[31m[ERROR]\033[0m .env not found. Create it with: cp .env.example .env"; \
+		exit 1; \
+	fi
+	@WS="$(WORKSPACE_DIR)"; \
+	if [ -z "$$WS" ]; then \
+		echo "\033[31m[ERROR]\033[0m WORKSPACE_DIR is not set in .env. Point it at your workspace directory."; \
+		exit 1; \
+	fi; \
+	if [ ! -d "$$WS" ]; then \
+		echo "\033[31m[ERROR]\033[0m WORKSPACE_DIR '$$WS' does not exist. Create it first."; \
+		exit 1; \
+	fi
+
+# ── Gateway Profile (llm-gateway) ──
+
+gateway-up: check-workspace ## Start llm-gateway with build
+	$(COMPOSE) $(PROFILE_GATEWAY) up -d --build llm-gateway
+
+gateway-down: ## Stop llm-gateway and remove orphans
+	$(COMPOSE) $(PROFILE_GATEWAY) down --remove-orphans
+
+gateway-build: ## Build llm-gateway image
+	$(COMPOSE) $(PROFILE_GATEWAY) build llm-gateway
+
+gateway-clean: ## Stop llm-gateway, remove orphans (no volumes to wipe)
+	$(COMPOSE) $(PROFILE_GATEWAY) down --remove-orphans
+
+gateway-logs: ## Tail llm-gateway logs
+	$(COMPOSE) $(PROFILE_GATEWAY) logs -f llm-gateway
+
+gateway-config: ## Validate compose configuration with gateway profile
+	$(COMPOSE) $(PROFILE_GATEWAY) config
+
+# ── Hermes Profile (hermes) ──
+
+hermes-up: check-workspace hermes-perms ## Start hermes with build
+	$(COMPOSE) $(PROFILE_HERMES) up -d --build hermes
+
+hermes-down: ## Stop hermes and remove orphans
+	$(COMPOSE) $(PROFILE_HERMES) down --remove-orphans
+
+hermes-build: ## Build hermes image
+	$(COMPOSE) $(PROFILE_HERMES) build hermes
+
+hermes-clean: ## Stop hermes, remove orphans, and wipe volume
+	$(COMPOSE) $(PROFILE_HERMES) down -v --remove-orphans
+
+hermes-logs: ## Tail hermes logs
+	$(COMPOSE) $(PROFILE_HERMES) logs -f hermes
+
+hermes-config: ## Validate compose configuration with hermes profile
+	$(COMPOSE) $(PROFILE_HERMES) config
+
+hermes-perms: ## Create volume + fix ownership to hermes UID:GID (10000:10000)
+	docker volume create --label com.docker.compose.project=$(COMPOSE_PROJECT_NAME) --label com.docker.compose.volume=hermes-data $(HERMES_DATA_VOLUME) >/dev/null
+	docker run --rm -v $(HERMES_DATA_VOLUME):/data alpine chown -R 10000:10000 /data
+
+# ── All Profiles (start everything) ──
+
+all-up: check-workspace hermes-perms design-perms dsh-perms terrain-perms ## Start everything: gateway + hermes + design + dsh + terrain
+	$(COMPOSE) $(ALL_PROFILES) up -d --build
+
+all-down: ## Stop everything (all profile containers, remove orphans)
+	$(COMPOSE) $(ALL_PROFILES) down --remove-orphans
+
+all-clean: ## Stop everything + wipe ALL volumes and orphans
+	$(COMPOSE) $(ALL_PROFILES) down -v --remove-orphans
+
+# ── OpenDesign Profile (design) ──
+
+design-up: check-workspace design-perms ## Start open-design with build
+	@BIND="$${OPEN_DESIGN_BIND_IP:-$(call ext_env,OPEN_DESIGN_BIND_IP)}"; \
+	TOKEN="$(call ext_env,OD_API_TOKEN)"; \
+	if [ "$$BIND" = "0.0.0.0" ] || [ "$$BIND" = "::" ]; then \
+		if [ -z "$$TOKEN" ] || [ "$$TOKEN" = "admin" ]; then \
+			echo "\033[31m[WARN]\033[0m OPEN_DESIGN_BIND_IP=$$BIND exposes open-design to the LAN with default/empty OD_API_TOKEN. Set a strong token or keep 127.0.0.1."; \
+		fi; \
+		echo "\033[33m[INFO]\033[0m LAN mode: browse via http://<host-ip>:$(call ext_env,OPEN_DESIGN_PORT)"; \
+	fi
+	$(COMPOSE) $(PROFILE_DESIGN) up -d --build open-design
+
+design-down: ## Stop open-design and remove orphans
+	$(COMPOSE) $(PROFILE_DESIGN) down --remove-orphans
+
+design-build: ## Build open-design image
+	$(COMPOSE) $(PROFILE_DESIGN) build open-design
+
+design-clean: ## Stop open-design, remove orphans, and wipe volume
+	$(COMPOSE) $(PROFILE_DESIGN) down -v --remove-orphans
+
+design-logs: ## Tail open-design logs
+	$(COMPOSE) $(PROFILE_DESIGN) logs -f open-design
+
+design-perms: ## Create volume + fix ownership to host UID:GID
+	docker volume create --label com.docker.compose.project=$(COMPOSE_PROJECT_NAME) --label com.docker.compose.volume=open_design_data $(DESIGN_VOLUME) >/dev/null
+	docker run --rm -v $(DESIGN_VOLUME):/data alpine chown -R $(UID):$(GID) /data
+
+design-import: ## Link a workspace folder: make design-import d=/opt/data/workspace/<dir> [n=<name>]
+	@if [ -z "$(d)" ]; then echo "Usage: make design-import d=/opt/data/workspace/<folder> [n=<name>] (container path)"; exit 1; fi
+	@TOKEN="$(call ext_env,OD_API_TOKEN)"; \
+	NAME_ARG=""; if [ -n "$(n)" ]; then NAME_ARG="--name $(n)"; fi; \
+	$(COMPOSE) exec -T open-design node /app/apps/daemon/bin/od.mjs project import "$(d)" $$NAME_ARG
+
+design-config: ## Validate compose configuration with design profile
+	$(COMPOSE) $(PROFILE_DESIGN) config
+
+# ── DSH Profile (dsh) ──
+
+dsh-up: check-workspace dsh-perms ## Start dsh with build
+	$(COMPOSE) $(PROFILE_DSH) up -d --build dsh
+	$(MAKE) dsh-ensure-web
+
+dsh-down: ## Stop dsh and remove orphans
+	$(COMPOSE) $(PROFILE_DSH) down --remove-orphans
+
+dsh-build: ## Build dsh image
+	$(COMPOSE) $(PROFILE_DSH) build dsh
+
+dsh-clean: ## Stop dsh, remove orphans, and wipe volumes
+	$(COMPOSE) $(PROFILE_DSH) down -v --remove-orphans
+
+dsh-logs: ## Tail dsh logs
+	$(COMPOSE) $(PROFILE_DSH) logs -f dsh
+
+dsh-perms: ## Create volumes + fix ownership to host UID:GID
+	docker volume create --label com.docker.compose.project=$(COMPOSE_PROJECT_NAME) --label com.docker.compose.volume=dsh_data $(DSH_DATA_VOLUME) >/dev/null
+	docker volume create --label com.docker.compose.project=$(COMPOSE_PROJECT_NAME) --label com.docker.compose.volume=dsh_toolchains $(DSH_TOOLCHAINS_VOLUME) >/dev/null
+	docker run --rm -v $(DSH_DATA_VOLUME):/data alpine chown -R $(UID):$(GID) /data
+	docker run --rm -v $(DSH_TOOLCHAINS_VOLUME):/data alpine chown -R $(UID):$(GID) /data
+
+dsh-sync-models: ## Push regenerated provider config into live DSH volume
+	@OUT=$$(python3 scripts/push-dsh-models.py --volume $(DSH_DATA_VOLUME) --uid $(UID) --gid $(GID) | tail -n 1); \
+	echo "dsh models: $$OUT"; \
+	if [ "$$OUT" = "RESULT:CHANGED" ]; then $(COMPOSE) restart dsh >/dev/null && $(MAKE) dsh-ensure-web; fi
+
+dsh-ensure-web: ## Wait for dsh web boot to be healthy
+	@for i in $$(seq 1 60); do \
+	  if $(COMPOSE) exec -T dsh node -e "require('net').connect(3081,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))" 2>/dev/null; then \
+	    echo "dsh web profile healthy"; exit 0; \
+	  fi; \
+	  sleep 5; \
+	done; \
+	echo "[ERROR] dsh web did not become healthy in time"; exit 1
+
+dsh-password: ## Print the one-time login token URL
+	@TOKEN=$$($(COMPOSE) logs --no-log-prefix dsh 2>&1 | grep -o '?token=[^[:space:]]*' | tail -1 | sed 's/.*token=//'); \
+	if [ -z "$$TOKEN" ]; then echo "[ERROR] No token in logs yet — is dsh booted?"; exit 1; fi; \
+	PORT="$${DSH_PORT:-$(call ext_env,DSH_PORT)}"; \
+	PORT="$${PORT:-9229}"; \
+	echo "http://127.0.0.1:$$PORT/?token=$$TOKEN"
+
+dsh-config: ## Validate compose configuration with dsh profile
+	$(COMPOSE) $(PROFILE_DSH) config
+
+dsh-versions-check: ## Verify DSH pins/gates agree across .env.example, compose, Dockerfile, plugins
+	python3 scripts/check-dsh-versions.py
+
+# ── Terrain Profile (terrain) ──
+
+terrain-up: check-workspace terrain-perms ## Start terrain with build
+	$(COMPOSE) $(PROFILE_TERRAIN) up -d --build terrain
+
+terrain-down: ## Stop terrain and remove orphans
+	$(COMPOSE) $(PROFILE_TERRAIN) down --remove-orphans
+
+terrain-build: ## Build terrain image
+	$(COMPOSE) $(PROFILE_TERRAIN) build terrain
+
+terrain-clean: ## Stop terrain, remove orphans, and wipe volume
+	$(COMPOSE) $(PROFILE_TERRAIN) down -v --remove-orphans
+
+terrain-logs: ## Tail terrain logs
+	$(COMPOSE) $(PROFILE_TERRAIN) logs -f terrain
+
+terrain-perms: ## Create volume + fix ownership to container's terrain user (1000:1000)
+	docker volume create --label com.docker.compose.project=$(COMPOSE_PROJECT_NAME) --label com.docker.compose.volume=terrain_data $(TERRAIN_DATA_VOLUME) >/dev/null
+	docker run --rm -v $(TERRAIN_DATA_VOLUME):/data alpine chown -R 1000:1000 /data
+
+terrain-index: ## Index a project: make terrain-index d=/opt/data/workspace/<dir> [n=<slug>]
+	@if [ -z "$(d)" ]; then echo "Usage: make terrain-index d=/opt/data/workspace/<folder> [n=<slug>]"; exit 1; fi
+	@SLUG=""; if [ -n "$(n)" ]; then SLUG="--slug $(n)"; fi; \
+	$(COMPOSE) exec -T terrain terrain scan "$(d)" $$SLUG
+
+terrain-ask: ## Knowledge Q&A: make terrain-ask q="<question>" [n=<slug>]
+	@if [ -z "$(q)" ]; then echo "Usage: make terrain-ask q=\"<question>\" [n=<slug>]"; exit 1; fi
+	@SLUG=""; if [ -n "$(n)" ]; then SLUG="--project $(n)"; fi; \
+	$(COMPOSE) exec -T terrain terrain ask query "$(q)" $$SLUG
+
+terrain-config: ## Validate compose configuration with terrain profile
+	$(COMPOSE) $(PROFILE_TERRAIN) config
+
+# ── Models & Sync ──
+
+sync: ## Sync models from keyed providers, reload gateway
+	python3 scripts/sync-models.py
+	@echo "DSH seed regenerated — push live with: make dsh-sync-models"
+
+sync-dry: ## Preview synced models without writing config
+	python3 scripts/sync-models.py --dry-run

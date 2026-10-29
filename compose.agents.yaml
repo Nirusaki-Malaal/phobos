@@ -1,0 +1,459 @@
+# pai-stack — Consolidated Docker Compose
+# All services in one file with profiles — every service is optional.
+# Profiles: gateway, hermes, terrain, dsh, design
+# Run any combination: `docker compose --profile hermes --profile gateway up -d`
+
+services:
+  # ──────────────────────────────────────────────────────────────
+  # Profile: gateway — LLM Gateway (LiteLLM proxy)
+  # ──────────────────────────────────────────────────────────────
+  llm-gateway:
+    # Pinned by digest (2026-09-27): main-latest is a moving target and a gateway
+    # behavior change here breaks every model route at once (see Sep-25 reasoning
+    # incident). This digest is the verified-good build. To upgrade: replace digest,
+    # rebuild, and re-run the pair-shape probe (reasoning_effort + forced tool call).
+    image: ghcr.io/berriai/litellm@sha256:a79320760af8df488074ab3fbc830883856c7f952976aad00f039d3a43ffe4b2
+    restart: unless-stopped
+    profiles:
+      - gateway
+    ports:
+      # Loopback by default. The gateway holds every provider key
+      # in its config, so it should never be reachable off-host
+      # unless you deliberately widen it (LLM_GATEWAY_BIND_IP=0.0.0.0,
+      # legacy BIND_IP as fallback).
+      - "${LLM_GATEWAY_BIND_IP:-${BIND_IP:-127.0.0.1}}:4000:4000"
+    command: [ "--config", "/app/config.yaml", "--port", "4000" ]
+    environment:
+      - PORT=4000
+      - STORE_MODEL_IN_DB=False
+      - OPENAI_COMPATIBLE_BASE_URL=${OPENAI_COMPATIBLE_BASE_URL:-${PRIMARY_LLM_BASE_URL:-${LLM_BASE_URL:-${LLAMACPP_BASE_URL:-http://host.docker.internal:8080/v1}}}}
+      - OPENAI_COMPATIBLE_MODEL=${OPENAI_COMPATIBLE_MODEL:-${PRIMARY_LLM_MODEL:-${LLM_MODEL:-${LLAMACPP_MODEL_NAME:-default}}}}
+      - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY:-${PRIMARY_LLM_API_KEY:-${LLM_API_KEY:-${OPENAI_API_KEY:-not-needed}}}}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILO_GATEWAY_API_KEY=${KILO_GATEWAY_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - OLLAMA_CLOUD_API_KEY=${OLLAMA_CLOUD_API_KEY:-}
+      - AION_LABS_API_KEY=${AION_LABS_API_KEY:-}
+      - LITELLM_MASTER_KEY
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      - OTEL_EXPORTER=console
+    volumes:
+      - ./llm-gateway/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      default:
+        aliases:
+          - litellm
+
+  # ──────────────────────────────────────────────────────────────
+  # Profile: hermes — AI Agent Gateway + Dashboard
+  # ──────────────────────────────────────────────────────────────
+  hermes:
+    build:
+      context: ./hermes
+      dockerfile: Dockerfile
+    image: phobos-hermes:local
+    restart: unless-stopped
+    profiles:
+      - hermes
+    # Session cwd: agent shell/delegates boot here, same path DSH uses
+    # (dsh working_dir) — one shared root, no per-agent translation.
+    working_dir: /opt/data/workspace
+    # depends_on removed: each service is independently runnable.
+    # Use `make gateway-up hermes-up` to start both with gateway first.
+    environment:
+      - HERMES_HOME=/opt/hermes/data
+      - HERMES_DATA_DIR=/opt/data/workspace
+      - HERMES_LAZY_INSTALL_TARGET=/opt/hermes/data/lazy-packages
+      - PYTHONPATH=/opt/hermes/data/lazy-packages
+      - LLM_GATEWAY_BASE_URL=http://llm-gateway:4000/v1
+      - LLM_GATEWAY_URL=http://llm-gateway:4000/v1
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-not-needed}
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-phobos}
+      - HERMES_UID=10000
+      - HERMES_GID=10000
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_HOST=0.0.0.0
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_KEY=${API_SERVER_KEY:-}
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-admin}
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}
+      - HERMES_DASHBOARD_BASIC_AUTH_SECRET=${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-not-needed}
+      - TERRAIN_URL=http://terrain:7878
+      - TERRAIN_TOKEN=${TERRAIN_TOKEN:-}
+      - OD_API_TOKEN=${OD_API_TOKEN:-}
+      - HERMES_API_TIMEOUT=1800
+      - HERMES_STREAM_READ_TIMEOUT=1800
+      - HERMES_LOCAL_STREAM_STALE_TIMEOUT=1800
+      - HERMES_STREAM_STALE_TIMEOUT=1800
+      - MNEMOSYNE_DATA_DIR=/opt/hermes/data/mnemosyne/data
+      - MNEMOSYNE_AUTO_SLEEP_ENABLED=true
+      - MNEMOSYNE_AUTO_SLEEP_THRESHOLD=30
+      - MNEMOSYNE_SELF_ECHO_ENABLED=1
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      - TELEGRAM_BOT_TOKEN=${HERMES_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      - TELEGRAM_ALLOWED_USERS=${HERMES_TELEGRAM_ALLOWED_USERS:-${TELEGRAM_ALLOWED_USERS:-}}
+      - TELEGRAM_GROUP_ALLOWED_USERS=${HERMES_TELEGRAM_GROUP_ALLOWED_USERS:-${TELEGRAM_GROUP_ALLOWED_USERS:-}}
+      - TELEGRAM_GROUP_ALLOWED_CHATS=${HERMES_TELEGRAM_GROUP_ALLOWED_CHATS:-${TELEGRAM_GROUP_ALLOWED_CHATS:-}}
+      # The terrain profile is opt-in and may not be running; the
+      # client defaults to http://terrain:7878 and self-hides when
+      # it cannot reach it, so this is explicit rather than required.
+      - TERRAIN_URL=http://terrain:7878
+      # Enable s6-overlay to remount /run with exec (needs CAP_SYS_ADMIN)
+      - S6_READ_ONLY_ROOT=1
+      # Tell s6-overlay the target user for privilege drop (preinit, fix-attrs)
+      - S6_UID=10000
+      - S6_GID=10000
+    ports:
+      # Loopback by default: nothing outside this host needs the agent
+      # dashboard or API. Set HERMES_BIND_IP=0.0.0.0 to widen (e.g. you reach
+      # the dashboard from another machine) — one variable, both ports.
+      # Falls back to legacy BIND_IP for pre-rename .env files.
+      - "${HERMES_BIND_IP:-${BIND_IP:-127.0.0.1}}:9119:9119"
+      - "${HERMES_BIND_IP:-${BIND_IP:-127.0.0.1}}:8642:8642"
+    volumes:
+      - hermes-data:/opt/hermes/data
+      - ./hermes/config.yaml:/tmp/hermes-config.yaml.host:ro
+      - ./skills:/opt/pai/skills:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - type: bind
+        source: ${WORKSPACE_DIR:-${PHOBOS_WORKSPACE_DIR:-./workspace}}
+        target: /opt/data/workspace
+        bind:
+          create_host_path: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    user: "10000:10000"
+    cap_drop:
+      - ALL
+    cap_add:
+      - FOWNER
+      - SETUID
+      - SETGID
+      - CHOWN
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /run:exec,uid=10000,gid=10000
+      - /var_run
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9119/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────
+  # Profile: terrain — Code Intelligence Service
+  # ──────────────────────────────────────────────────────────────
+  terrain:
+    build:
+      context: ./terrain
+      args:
+        TERRAIN_REF: ${TERRAIN_REF:-main}
+    image: ${TERRAIN_IMAGE:-phobos-terrain:local}
+    restart: unless-stopped
+    profiles:
+      - terrain
+    # No depends_on: terrain has NO link to llm-gateway. The ACP agent it spawns
+    # for `init`/`ask` talks to OpenCode's own Zen endpoint, the same keyless path
+    # hermes' opencode-delegate uses. Terrain's own OpenAI-compatible settings are
+    # left empty for the same reason, so nothing here can silently route back
+    # through the gateway.
+    environment:
+      TERRAIN_PORT: "7878"
+      TERRAIN_WORKSPACE: /opt/data/workspace
+      # "1" enables the LLM-backed actions (init/ask). Off by default: indexing
+      # needs no LLM, so the cheap path is the default path.
+      TERRAIN_ALLOW_LLM: ${TERRAIN_ALLOW_LLM:-0}
+      # Optional shared secret. When set, callers must send x-terrain-token.
+      TERRAIN_TOKEN: ${TERRAIN_TOKEN:-}
+    ports:
+      - "${TERRAIN_BIND_IP:-127.0.0.1}:${TERRAIN_PORT:-7878}:7878"
+    volumes:
+      - terrain_data:/var/lib/terrain
+      - type: bind
+        source: ${WORKSPACE_DIR:-${PHOBOS_WORKSPACE_DIR:-./workspace}}
+        target: /opt/data/workspace
+        read_only: false
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,exec
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${TERRAIN_MEM_LIMIT:-2g}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(7878,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # terrain runs as fixed UID 1000:1000 (not host UID:GID)
+    user: "1000:1000"
+
+  # ──────────────────────────────────────────────────────────────
+  # Profile: dsh — DeepSeek Harness Agent
+  # ──────────────────────────────────────────────────────────────
+  dsh:
+    build:
+      context: ./dsh
+      dockerfile: Dockerfile
+      args:
+        # DSH version to install from npm
+        DSH_VERSION: ${DSH_VERSION:-0.2.0-rc.2}
+        # Host UID/GID for permission mapping (auto-detected by Makefile)
+        TARGET_UID: ${UID:-1000}
+        TARGET_GID: ${GID:-1000}
+        # Whether to install Docker CLI and mount socket
+        WITH_DOCKER_SOCKET: ${DSH_WITH_DOCKER_SOCKET:-true}
+        # Base image (can use node:24-slim, node:24-alpine, etc.)
+        BASE_IMAGE: ${DSH_BASE_IMAGE:-node:24-slim}
+        # Auth plugin (@xgone/dsh-remote) — matches upstream default
+        WITH_REMOTE_PLUGIN: ${DSH_WITH_REMOTE_PLUGIN:-true}
+        REMOTE_PLUGIN_VERSION: ${DSH_REMOTE_PLUGIN_VERSION:-0.3.5}
+        REMOTE_PLUGIN_NAME: ${DSH_REMOTE_PLUGIN_NAME:-@xgone/dsh-remote}
+        # Memory plugin (dsh-mnemon) — tools surface as mnemon_*
+        WITH_MNEMON_PLUGIN: ${DSH_WITH_MNEMON_PLUGIN:-true}
+        MNEMON_PLUGIN_VERSION: ${DSH_MNEMON_PLUGIN_VERSION:-0.5.24}
+        MNEMON_PLUGIN_NAME: ${DSH_MNEMON_PLUGIN_NAME:-dsh-mnemon}
+        # Durable automation plugin (@michengai/dsh-automation) — resolved
+        # into the single joint seed tree in the final image stage
+        WITH_AUTOMATION_PLUGIN: ${DSH_WITH_AUTOMATION_PLUGIN:-true}
+        AUTOMATION_PLUGIN_VERSION: ${DSH_AUTOMATION_PLUGIN_VERSION:-0.1.54}
+        AUTOMATION_PLUGIN_NAME: ${DSH_AUTOMATION_PLUGIN_NAME:-@michengai/dsh-automation}
+        # First-party Telegram plugin (in-repo plugins/dsh-pai-telegram,
+        # copied into the single joint seed tree in final; no registry, no version to pin)
+        WITH_TELEGRAM_PLUGIN: ${DSH_WITH_TELEGRAM_PLUGIN:-true}
+        TELEGRAM_PLUGIN_NAME: dsh-pai-telegram
+        # Local browser surfing (Playwright + Chromium, replaces DeepSeek search)
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.49.1}
+    image: ${DSH_IMAGE:-phobos-dsh:local}
+    restart: unless-stopped
+    profiles:
+      - dsh
+    # Session cwd: the sandbox policy sets workspaceRoot = process.cwd()
+    # (verified via `dsh --profile web --dump-config`), so the web UI starts
+    # in the shared workspace — same filepaths Hermes sees.
+    working_dir: /opt/data/workspace
+    # depends_on removed: each service is independently runnable.
+    # Use `make gateway-up dsh-up` to start both with gateway first.
+    environment:
+      # DSH home directory (sessions, configs, plugins, memory)
+      DSH_HOME: /data/dsh
+      # Writable home on the data volume (NOT the read-only image layer:
+      # pnpm and toolchain caches need a writable HOME; session cwd comes
+      # from working_dir above, not from $HOME)
+      HOME: /data/dsh/home
+      # Skills root — required for dsh-skill-filesystem plugin
+      # Points at the mount target, not the host path
+      DSH_AGENTS_HOME: /data/dsh/.agents
+      # LLM Gateway (same as Hermes)
+      DEEPSEEK_API_KEY: ${LITELLM_MASTER_KEY:-not-needed}
+      DEEPSEEK_BASE_URL: http://llm-gateway:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:-not-needed}
+      OPENAI_BASE_URL: http://llm-gateway:4000/v1
+      # Auth: @xgone/dsh-remote plugin pre-installed in image, seeded on first boot
+      # Admin user + random 16-char password (printed once in logs via make dsh-password)
+      DSH_SETUP_REMOTE: ${DSH_SETUP_REMOTE:-on}
+      # Automation tasks: official experimental schedule bundle (ships in the
+      # image, enabled by appending it to the web profile bundles — no install).
+      # "false" leaves the shipped composition untouched. Default: off (use @michengai/dsh-automation instead).
+      DSH_WITH_SCHEDULE: ${DSH_WITH_SCHEDULE:-false}
+      # Durable automation (cron that fires with no chat open). "false" drops
+      # it from the manifest (code stays on disk, unloaded — single joint tree).
+      DSH_WITH_AUTOMATION: ${DSH_WITH_AUTOMATION:-true}
+      # First-party Telegram poller (dsh-pai-telegram). "false" drops it
+      # from the manifest (code stays on disk, unloaded — single joint tree).
+      DSH_WITH_TELEGRAM: ${DSH_WITH_TELEGRAM:-true}
+      # Pre-seed locale preference to English (dsh-automation has Chinese prompts).
+      # "false" skips seeding the locale preference.
+      DSH_SEED_LOCALE: ${DSH_SEED_LOCALE:-true}
+      # Plugin seeds: one runtime gate each ("false" drops the plugin from
+      # the manifest — code stays on disk, unloaded — and never removes an
+      # installed seed's files). Build-time WITH_* only controls what the
+      # image ships; a gate can't install what was never baked.
+      # DSH_WITH_AUTOMATION/TELEGRAM/SCHEDULE already exist.
+      DSH_WITH_AUTH: ${DSH_WITH_AUTH:-true}
+      DSH_WITH_MNEMON: ${DSH_WITH_MNEMON:-true}
+      DSH_WITH_PAI_PLUGINS: ${DSH_WITH_PAI_PLUGINS:-true}
+      # DeepSeek-hosted web search off by default (entrypoint overlay:
+      # tool-web.search:false + web-search-deepseek.disabled). DSH surfs
+      # with local Playwright/Chromium (dsh-pai-web) + web-fetch-http +
+      # notebook/terrain/mnemon instead. "false" keeps upstream search.
+      DSH_DISABLE_WEB_SEARCH: ${DSH_DISABLE_WEB_SEARCH:-true}
+      DSH_DEFAULT_ADMIN_USER: ${DSH_DEFAULT_ADMIN_USER:-admin}
+      DSH_ADMIN_PASSWORD: ${DSH_ADMIN_PASSWORD:-}
+      # Telegram — separate DSH bot (see .env.example §9). DSH_TELEGRAM_TOKEN
+      # kept as alias for the planned first-party notifier; falls back to
+      # legacy shared TELEGRAM_BOT_TOKEN for pre-rename .env files.
+      DSH_TELEGRAM_TOKEN: ${DSH_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      DSH_TELEGRAM_BOT_TOKEN: ${DSH_TELEGRAM_BOT_TOKEN:-${TELEGRAM_BOT_TOKEN:-}}
+      DSH_TELEGRAM_ALLOWED_USERS: ${DSH_TELEGRAM_ALLOWED_USERS:-${TELEGRAM_ALLOWED_USERS:-}}
+      DSH_TELEGRAM_GROUP_ALLOWED_USERS: ${DSH_TELEGRAM_GROUP_ALLOWED_USERS:-${TELEGRAM_GROUP_ALLOWED_USERS:-}}
+      DSH_TELEGRAM_GROUP_ALLOWED_CHATS: ${DSH_TELEGRAM_GROUP_ALLOWED_CHATS:-${TELEGRAM_GROUP_ALLOWED_CHATS:-}}
+      # Trusted hosts for LAN/DNS access (if DSH_BIND_IP=0.0.0.0)
+      DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-}
+      OD_API_TOKEN: ${OD_API_TOKEN:-}
+      # Node.js memory limit
+      NODE_OPTIONS: --max-old-space-size=${NODE_MAX_OLD_SPACE:-1024}
+      # Disable native cache (use volume instead)
+      NARB_DISABLE_NATIVE_CACHE: 1
+      # Docker CLI talks to the mounted host socket directly
+      # (no DOCKER_HOST override, no proxy socket).
+      DOCKER_CONFIG: /data/dsh/home/.docker
+      # Directory-picker start directory (see Dockerfile patch): the
+      # "Select Workspace Directory" dialog opens here instead of $HOME.
+      # Same path as the workspace mount below — no extra vars.
+      WORKSPACE_DIR: /opt/data/workspace
+    ports:
+      # Host port 9229 → container port 3080 (socat forwards to 3081)
+      - "${DSH_BIND_IP:-127.0.0.1}:${DSH_PORT:-9229}:3080"
+    volumes:
+      # DSH data volume: sessions, configs, plugins, memory, mnemon DB
+      - dsh_data:/data/dsh
+      # Toolchain caches volume: Go, Rust, uv, pip caches (the volume root
+      # IS the .cache content, kept out of the shared workspace)
+      - dsh_toolchains:/data/dsh/home/.cache
+      # Workspace bind mount at the shared path (same as Hermes), so both
+      # agents see identical filepaths (/opt/data/workspace/<project>)
+      - type: bind
+        source: "${WORKSPACE_DIR:-${PHOBOS_WORKSPACE_DIR:-./workspace}}"
+        target: /opt/data/workspace
+        read_only: false
+        bind:
+          create_host_path: false
+      # Skills mount (read-only)
+      - type: bind
+        source: ./skills
+        target: /data/dsh/.agents/skills
+        read_only: true
+      # Docker socket: host daemon reuse so DSH can restart services
+      # and spin up project containers. :ro is mount mode only — the
+      # socket API still works (same as hermes).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Run as the host user from PID 1 (no setpriv dance). Supplementary
+    # groups from group_add are preserved, giving socket access.
+    user: "${UID:-1000}:${GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-0}"
+    # Security hardening (no extra caps: no chown, no setpriv, no proxy)
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,exec
+      - /run:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3081,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ──────────────────────────────────────────────────────────────
+  # Profile: design — OpenDesign Design Generation / Mockup Bridge
+  # ──────────────────────────────────────────────────────────────
+  open-design:
+    build:
+      context: ./opendesign
+      args:
+        # Baked into /app/.od ownership (see Dockerfile): fresh named volumes
+        # inherit the image's ownership, so it must match the runtime `user:`.
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: ${OPEN_DESIGN_IMAGE:-phobos-open-design:local}
+    restart: unless-stopped
+    profiles:
+      - design
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=192}
+      # Writable HOME for the bundled opencode's cache/sessions (ephemeral tmpfs).
+      # Daemon state is unaffected (OD_DATA_DIR -> /app/.od volume).
+      HOME: /tmp
+      OD_BIND_HOST: 0.0.0.0
+      OD_ALLOWED_ORIGINS: ${OPEN_DESIGN_ALLOWED_ORIGINS:-}
+      OD_PORT: 7456
+      OD_WEB_PORT: ${OPEN_DESIGN_PORT:-7456}
+      OD_API_TOKEN: ${OD_API_TOKEN:-}
+      OD_DISABLE_API_AUTH: ${OPEN_DESIGN_DISABLE_API_AUTH:-}
+      OD_CODEX_SANDBOX: ${OD_CODEX_SANDBOX:-}
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:-not-needed}
+      OPENAI_BASE_URL: http://llm-gateway:4000/v1
+    ports:
+      # Host bind IP defaults to loopback. Set OPEN_DESIGN_BIND_IP=0.0.0.0 to
+      # reach the UI via LAN IP / DNS name (pair with OPEN_DESIGN_ALLOWED_ORIGINS).
+      - "${OPEN_DESIGN_BIND_IP:-127.0.0.1}:${OPEN_DESIGN_PORT:-7456}:7456"
+    volumes:
+      - open_design_data:/app/.od
+      - type: bind
+        source: ${WORKSPACE_DIR:-${PHOBOS_WORKSPACE_DIR:-./workspace}}
+        target: /opt/data/workspace
+        read_only: false
+        bind:
+          create_host_path: false
+    user: "${UID:-1000}:${GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:7456/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# ──────────────────────────────────────────────────────────────
+# Volumes (all services)
+# ──────────────────────────────────────────────────────────────
+volumes:
+  hermes-data:
+  terrain_data:
+  dsh_data:
+  dsh_toolchains:
+  open_design_data:
