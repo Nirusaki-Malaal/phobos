@@ -1,0 +1,3 @@
+name: compressor
+version: "0.1.0"
+description: Heuristic pre-pass for context compression — reduces token usage before Hermes's built-in compressor
