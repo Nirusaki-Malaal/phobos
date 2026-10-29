@@ -1,0 +1,81 @@
+name: phobos
+include:
+  - compose.agents.yaml
+
+x-runtime: &runtime
+  image: phobos:local
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  environment:
+    PHOBOS_API_TOKEN: ${PHOBOS_API_TOKEN:-}
+    PHOBOS_HOST: 0.0.0.0
+    PHOBOS_DATA_DIR: /data
+    PHOBOS_WORKSPACE_DIR: /workspace
+    PHOBOS_GATEWAY_URL: ${PHOBOS_DOCKER_GATEWAY_URL:-http://llm-gateway:4000/v1}
+    PHOBOS_GATEWAY_KEY: ${PHOBOS_GATEWAY_KEY:-${LITELLM_MASTER_KEY:-}}
+    PHOBOS_MODEL: ${PHOBOS_MODEL:-}
+    PHOBOS_TELEGRAM_TOKEN: ${PHOBOS_TELEGRAM_TOKEN:-}
+    PHOBOS_TELEGRAM_USERS: ${PHOBOS_TELEGRAM_USERS:-}
+    PHOBOS_TELEGRAM_CHANNEL: ${PHOBOS_TELEGRAM_CHANNEL:-}
+    PHOBOS_TELEGRAM_PROJECT: ${PHOBOS_TELEGRAM_PROJECT:-personal}
+    PHOBOS_REPORT_HOUR_UTC: ${PHOBOS_REPORT_HOUR_UTC:-18}
+    PHOBOS_SKILL_AUTO_INSTALL: ${PHOBOS_SKILL_AUTO_INSTALL:-true}
+    PHOBOS_SKILL_SOURCES: ${PHOBOS_SKILL_SOURCES:-morluto/rea,alchaincyf/huashu-motion,anthropics/skills,vercel-labs/agent-skills,openai/skills}
+    PHOBOS_GRAPH_MEMORY: ${PHOBOS_GRAPH_MEMORY:-true}
+    PHOBOS_TRANSCRIPTION_MODEL_DIR: /models/whisper
+    TERRAIN_URL: http://terrain:7878
+    TERRAIN_TOKEN: ${TERRAIN_TOKEN:-}
+    OD_HOST: http://open-design:7456
+    OD_API_TOKEN: ${OD_API_TOKEN:-}
+    PHOBOS_PORT: 8080
+  volumes:
+    - phobos-data:/data
+    - ${WORKSPACE_DIR:-${PHOBOS_WORKSPACE_DIR:-./workspace}}:/workspace
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+
+services:
+  api:
+    <<: *runtime
+    ports:
+      - "127.0.0.1:${PHOBOS_PORT:-8080}:8080"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+  worker:
+    <<: *runtime
+    command: [worker]
+  telegram:
+    <<: *runtime
+    command: [telegram]
+    profiles: [telegram]
+  creative-worker:
+    <<: *runtime
+    image: phobos-creative:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.creative
+    command: [worker]
+    profiles: [creative]
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    shm_size: 256m
+    volumes:
+      - phobos-data:/data
+      - ${WORKSPACE_DIR:-${PHOBOS_WORKSPACE_DIR:-./workspace}}:/workspace
+      - ${PHOBOS_MODEL_DIR:-./models}:/models:ro
+
+volumes:
+  phobos-data:
