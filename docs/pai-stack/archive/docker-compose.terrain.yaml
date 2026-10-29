@@ -1,0 +1,92 @@
+# pai-stack — Terrain code-intelligence service (optional override).
+# Usage:
+#   make terrain-up        # start terrain (profile: terrain) alongside core stack
+#   make terrain-build     # build the image (Rust, from source — first build is slow)
+#   make terrain-index d=  # index a workspace project (container path)
+#   make terrain-down      # stop terrain only (workspace + volume untouched)
+#   make terrain-config    # validate merged compose configuration
+#
+# Design decisions:
+# - `profiles: ["terrain"]` keeps `make up` unaffected (opt-in only).
+# - BUILT FROM SOURCE. Terrain publishes prebuilt binaries for darwin-arm64 and
+#   win32-x64 only; `@terrain-ai/cli-linux-x64` is not on npm. See
+#   ./terrain/Dockerfile and .planning/2026-10-04-terrain-service/findings.md §1.
+# - SINGLE INDEX OWNER. Only this container writes `.terrain/`. Hermes and DSH
+#   trigger jobs and read the result; neither keeps a private index. This is the
+#   property the old in-process `pai_code_intel` could not provide.
+# - The CLI has no serve/daemon subcommand, so `./terrain/server.mjs` fronts it
+#   on port 7878 with two protocols: plain HTTP (`/call`) for the Hermes tool,
+#   and MCP (`/mcp`) for DSH's dsh-mcp-client. See findings.md §3–§4.
+# - `env apply` is unreachable by construction — the shim uses a closed action
+#   allowlist. That subcommand rewrites AGENTS.md and installs preset skills,
+#   which would overwrite files pai-stack owns.
+# - HOME=/var/lib/terrain on a named volume. Terrain keeps its project registry at
+#   ~/.terrain/registry.json, OUTSIDE any repo. It must not default into the
+#   workspace mount (findings.md §8).
+# - LLM actions (`ask`, `init` — the latter runs Litho) are gated OFF unless
+#   TERRAIN_ALLOW_LLM=1. They are NOT gateway-backed: terrain spawns an ACP
+#   agent (`opencode acp`) which uses OpenCode's own keyless Zen models, so this
+#   container has no dependency on llm-gateway. Indexing itself
+#   (`scan` / `refresh`) never calls an LLM, so the default posture costs zero
+#   tokens. See findings.md §5.
+# - No published port unless asked: agents reach it over the compose network.
+#   The loopback bind is for `make terrain-index` / debugging only.
+
+services:
+  terrain:
+    build:
+      context: ./terrain
+      args:
+        TERRAIN_REF: ${TERRAIN_REF:-main}
+    image: ${TERRAIN_IMAGE:-pai-stack-terrain:latest}
+    container_name: terrain
+    restart: unless-stopped
+    profiles:
+      - terrain
+    # No depends_on: terrain has NO link to llm-gateway. The ACP agent it spawns
+    # for `init`/`ask` talks to OpenCode's own Zen endpoint, the same keyless path
+    # hermes' opencode-delegate uses. Terrain's own OpenAI-compatible settings are
+    # left empty for the same reason, so nothing here can silently route back
+    # through the gateway.
+    environment:
+      TERRAIN_PORT: "7878"
+      TERRAIN_WORKSPACE: /opt/data/workspace
+      # "1" enables the LLM-backed actions (init/ask). Off by default: indexing
+      # needs no LLM, so the cheap path is the default path.
+      TERRAIN_ALLOW_LLM: ${TERRAIN_ALLOW_LLM:-0}
+      # Optional shared secret. When set, callers must send x-terrain-token.
+      TERRAIN_TOKEN: ${TERRAIN_TOKEN:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${TERRAIN_BIND_IP:-127.0.0.1}:${TERRAIN_PORT:-7878}:7878"
+    volumes:
+      - terrain_data:/var/lib/terrain
+      - type: bind
+        source: ${WORKSPACE_DIR}
+        target: /opt/data/workspace
+        read_only: false
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,exec
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${TERRAIN_MEM_LIMIT:-2g}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(7878,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  terrain_data:

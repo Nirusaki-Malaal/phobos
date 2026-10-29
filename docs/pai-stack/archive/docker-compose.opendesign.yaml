@@ -1,0 +1,107 @@
+# pai-stack — OpenDesign optional override (Phase 1: stock image, no bundled CLI).
+# Usage:
+#   make design-up      # start open-design (profile: design) alongside core stack
+#   make design-config   # validate merged compose configuration
+#   make design-down     # stop open-design only (workspace + daemon volume untouched)
+#
+# Design decisions:
+# - `profiles: ["design"]` keeps `make up` unaffected (opt-in only).
+# - Daemon state stays in named volume `open_design_data:/app/.od` (SQLite, config,
+#   artifacts index). Never bind-mount `.od` into the workspace — avoids SQLite
+#   lock contention with Hermes.
+# - `${WORKSPACE_DIR}` (same var Hermes uses) is bind-mounted at `/opt/data/workspace:rw`
+#   (matches Hermes mount path exactly). In the OpenDesign UI use "Import folder" ->
+#   `/opt/data/workspace/<project>`; the daemon records it as an imported-folder
+#   project (`metadata.baseDir`), so generated files land as real files in the host
+#   workspace where Hermes sees them.
+# - Host macOS `opencode` (Mach-O/arm64) CANNOT be bind-mounted into this Alpine
+#   Linux container (exec-format error). Linux CLI bundling is Phase 2
+#   (Dockerfile installing linux opencode + libc6-compat, mirroring upstream
+#   deploy/Dockerfile.local). Until then generation works via BYOK keys for
+#   public (non-RFC1918) endpoints pasted in the UI, or plain artifact browsing.
+# - Auth: single-tenant `OD_API_TOKEN`. Browser login is user `open-design` +
+#   token; API clients send `Authorization: Bearer <token>`. Default bind is
+#   127.0.0.1 (loopback only). To use the UI from a LAN host IP / DNS name,
+#   set OPEN_DESIGN_BIND_IP=0.0.0.0 AND list each browser origin in
+#   OPEN_DESIGN_ALLOWED_ORIGINS (exact scheme+host+port, comma-separated,
+#   e.g. `http://192.168.1.46:7456,http://office2:7456`) — otherwise the
+#   daemon's origin guard answers 403 `Cross-origin requests are not allowed`
+#   on every /api call (UI shell loads, generation fails). LAN origins dodge
+#   the upstream powered-preview trap (`localhost` is reserved as the preview
+#   iframe origin, so always browse via 127.0.0.1 or the LAN address, never
+#   `localhost`). Never publish on LAN/public with the default `admin` token
+#   or without a TLS proxy in front — `make design-up` warns when exposed.
+# - Image: built locally as pai-stack-open-design:latest (mirrors the
+#   pai-stack-hermes pattern). Set OPEN_DESIGN_IMAGE=ghcr.io/nexu-io/od:<ver>
+#   to run stock upstream without the bundled opencode (UI still works;
+#   generation then needs BYOK keys). Pin the base via
+#   --build-arg OPEN_DESIGN_BASE=ghcr.io/nexu-io/od:<ver|digest>.
+# - Memory: uncapped on purpose (no mem_limit). Upstream ships 384m, but that
+#   assumes no bundled CLI; daemon + opencode server + run exceed it and the
+#   kernel SIGKILLs the child (seen as AGENT_SIGNAL_SIGKILL). pids_limit stays.
+
+services:
+  open-design:
+    build:
+      context: ./opendesign
+      args:
+        # Baked into /app/.od ownership (see Dockerfile): fresh named volumes
+        # inherit the image's ownership, so it must match the runtime `user:`.
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: ${OPEN_DESIGN_IMAGE:-pai-stack-open-design:latest}
+    container_name: open-design
+    restart: unless-stopped
+    profiles:
+      - design
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=192}
+      # Writable HOME for the bundled opencode's cache/sessions (ephemeral tmpfs).
+      # Daemon state is unaffected (OD_DATA_DIR -> /app/.od volume).
+      HOME: /tmp
+      OD_BIND_HOST: 0.0.0.0
+      OD_ALLOWED_ORIGINS: ${OPEN_DESIGN_ALLOWED_ORIGINS:-}
+      OD_PORT: 7456
+      OD_WEB_PORT: ${OPEN_DESIGN_PORT:-7456}
+      OD_API_TOKEN: ${OD_API_TOKEN:-}
+      OD_DISABLE_API_AUTH: ${OPEN_DESIGN_DISABLE_API_AUTH:-}
+      OD_CODEX_SANDBOX: ${OD_CODEX_SANDBOX:-}
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:-not-needed}
+      OPENAI_BASE_URL: http://llm-gateway:4000/v1
+    ports:
+      # Host bind IP defaults to loopback. Set OPEN_DESIGN_BIND_IP=0.0.0.0 to
+      # reach the UI via LAN IP / DNS name (pair with OPEN_DESIGN_ALLOWED_ORIGINS).
+      - "${OPEN_DESIGN_BIND_IP:-127.0.0.1}:${OPEN_DESIGN_PORT:-7456}:7456"
+    volumes:
+      - open_design_data:/app/.od
+      - type: bind
+        source: ${WORKSPACE_DIR}
+        target: /opt/data/workspace
+        read_only: false
+        bind:
+          create_host_path: false
+    user: "${UID:-1000}:${GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:7456/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  open_design_data:

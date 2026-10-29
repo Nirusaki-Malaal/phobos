@@ -1,0 +1,18 @@
+{
+  "file": "phobos-dashboard-20s.mp4",
+  "duration_seconds": 20,
+  "resolution": [
+    1440,
+    1000
+  ],
+  "demo": true,
+  "live_provider": false,
+  "flow": [
+    "overview",
+    "local note creation and completion",
+    "task history",
+    "Graphify memory",
+    "REA skill",
+    "reviewed learning"
+  ]
+}

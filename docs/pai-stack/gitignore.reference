@@ -1,0 +1,22 @@
+
+hermes-data/
+.env
+*.log
+*.bak
+.planning/
+# Pair blackboard — shared-volume operational state (queue/claims/done/log),
+# hidden + untracked by design. The lock is os.rename on the shared mount,
+# not git. See .pair/AGENT_CONTRACT.md.
+.pair/
+.pair/telegram-groups.local.md
+__pycache__/
+.DS_Store
+
+
+# Added by cargo
+
+/target
+
+# Terrain code-intelligence index — per-repo, regenerated on demand, not source.
+# Written only by the `terrain` container; see docs/terrain.md.
+.terrain/
