@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+data
+workspace
+.project
+
+
+node_modules
+models
+docs/assets
