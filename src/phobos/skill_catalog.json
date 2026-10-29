@@ -1,0 +1,37 @@
+[
+  {
+    "name": "huashu-motion",
+    "repo": "alchaincyf/huashu-motion",
+    "revision": "52467f99c602b76ba86d511d37acdfe93fa1e16e",
+    "path": "skills/huashu-motion",
+    "description": "huashu motion"
+  },
+  {
+    "name": "algorithmic-art",
+    "repo": "anthropics/skills",
+    "revision": "ca45fc496a3436251f191354091d557da31c15b5",
+    "path": "skills/algorithmic-art",
+    "description": "algorithmic art"
+  },
+  {
+    "name": "web-artifacts-builder",
+    "repo": "anthropics/skills",
+    "revision": "ca45fc496a3436251f191354091d557da31c15b5",
+    "path": "skills/web-artifacts-builder",
+    "description": "web artifacts builder"
+  },
+  {
+    "name": "react-native-skills",
+    "repo": "vercel-labs/agent-skills",
+    "revision": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62",
+    "path": "skills/react-native-skills",
+    "description": "react native skills"
+  },
+  {
+    "name": "reverse-engineer-anything",
+    "repo": "morluto/rea",
+    "revision": "6fa48f201f932c6c12b540ee9799895a0a436d00",
+    "path": ".agents/skills/reverse-engineer-anything",
+    "description": "REA binary native JavaScript firmware reverse engineering"
+  }
+]
